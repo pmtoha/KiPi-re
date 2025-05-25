@@ -1,0 +1,14 @@
+/* Remove default margins and disable overflow to prevent scrollbars */
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Style the canvas to fill the window, set a background color,
+   and disable touch zoom/pinch for a smoother mobile experience */
+canvas {
+  background: #7ec850;
+  display: block;
+  touch-action: none;
+}

@@ -5,10 +5,242 @@
   <!-- Ensure proper scaling and full-screen friendly viewport on mobile -->
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>KiPi re.web</title>
-  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Remove default margins and disable overflow to prevent scrollbars */
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    /* Style the canvas to fill the window, set a background color,
+       and disable touch zoom/pinch for a smoother mobile experience */
+    canvas {
+      display: block;
+      touch-action: none;
+    }
+  </style>
 </head>
 <body>
   <canvas id="gameCanvas"></canvas>
-  <script src="game.js"></script>
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx    = canvas.getContext("2d");
+
+    // Make the canvas fill the window
+    function resizeCanvas() {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+
+    // --- Fullscreen on first touch (mobile) ---
+    function requestFullScreen() {
+      if (canvas.requestFullscreen)      canvas.requestFullscreen();
+      else if (canvas.webkitRequestFullscreen) canvas.webkitRequestFullscreen();
+      else if (canvas.msRequestFullscreen)     canvas.msRequestFullscreen();
+    }
+    function handleMobileFullScreen(e) {
+      if (!document.fullscreenElement &&
+          !document.webkitFullscreenElement &&
+          !document.msFullscreenElement) {
+        requestFullScreen();
+      }
+      document.removeEventListener("touchstart", handleMobileFullScreen);
+    }
+    document.addEventListener("touchstart", handleMobileFullScreen);
+
+    // --- Player setup ---
+    const player = {
+      x: 50,
+      y: canvas.height - 150,
+      width: 50,
+      height: 50,
+      velocityY: 0,
+      jumpForce: 15,
+      gravity: 0.7,
+      grounded: false
+    };
+
+    // --- Obstacles ---
+    let obstacles      = [];
+    let obstacleTimer  = 0;
+    const obstacleInterval = 1500; // ms
+
+    // --- Game control ---
+    let lastTime    = 0;
+    let gameRunning = true;
+    let score       = 0;
+    let gameSpeed   = 1;
+
+    // --- Cloud background setup ---
+    const clouds      = [];
+    const cloudCount  = 8;
+    const cloudSpeed  = 0.3; // base speed, multiplied by gameSpeed
+    for (let i = 0; i < cloudCount; i++) {
+      clouds.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * (canvas.height * 0.5),
+        scale: 0.5 + Math.random() * 0.8
+      });
+    }
+
+    // --- Main game loop ---
+    function gameLoop(timestamp) {
+      if (!gameRunning) return;
+
+      if (!lastTime) lastTime = timestamp;
+      const deltaTime = timestamp - lastTime;
+      lastTime = timestamp;
+
+      // speed & score
+      gameSpeed += deltaTime * 0.00005;
+      score     += gameSpeed * deltaTime * 0.01;
+
+      // --- Draw animated sky ---
+      // 1) Sky gradient
+      const skyGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      skyGrad.addColorStop(0, "#87CEEB");   // top: lighter blue
+      skyGrad.addColorStop(1, "#b0e0e6");   // bottom: pale blue
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 2) Moving clouds
+      clouds.forEach(cloud => {
+        cloud.x -= cloudSpeed * gameSpeed;
+        if (cloud.x < -200 * cloud.scale) {
+          cloud.x = canvas.width + 50;
+          cloud.y = Math.random() * (canvas.height * 0.5);
+        }
+
+        // draw a simple cloud shape
+        ctx.fillStyle = "rgba(255,255,255,0.8)";
+        ctx.beginPath();
+        const cw = 150 * cloud.scale;
+        const ch = 60  * cloud.scale;
+        ctx.ellipse(cloud.x, cloud.y, cw, ch, 0, 0, Math.PI * 2);
+        ctx.ellipse(cloud.x - cw * 0.6, cloud.y + ch * 0.1, cw * 0.7, ch * 0.7, 0, 0, Math.PI * 2);
+        ctx.ellipse(cloud.x + cw * 0.6, cloud.y + ch * 0.1, cw * 0.7, ch * 0.7, 0, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // --- Apply gravity & update player pos ---
+      player.velocityY += player.gravity;
+      player.y        += player.velocityY;
+
+      // ground collision
+      if (player.y + player.height > canvas.height - 100) {
+        player.y        = canvas.height - 100 - player.height;
+        player.velocityY = 0;
+        player.grounded  = true;
+      } else {
+        player.grounded = false;
+      }
+
+      // --- Draw ground ---
+      ctx.fillStyle = "#654321";
+      ctx.fillRect(0, canvas.height - 100, canvas.width, 100);
+
+      // --- Draw player ---
+      ctx.fillStyle = "#ff0000";
+      ctx.fillRect(player.x, player.y, player.width, player.height);
+
+      // --- Obstacles spawn & draw ---
+      obstacleTimer += deltaTime;
+      if (obstacleTimer > obstacleInterval) {
+        const h = 40 + Math.random() * 30;
+        obstacles.push({
+          x: canvas.width,
+          y: canvas.height - 100 - h,
+          width: 20 + Math.random() * 30,
+          height: h
+        });
+        obstacleTimer = 0;
+      }
+
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        const obs = obstacles[i];
+        obs.x -= 6 * gameSpeed;
+
+        // collision?
+        if (
+          player.x < obs.x + obs.width &&
+          player.x + player.width > obs.x &&
+          player.y < obs.y + obs.height &&
+          player.y + player.height > obs.y
+        ) {
+          return gameOver();
+        }
+
+        if (obs.x + obs.width < 0) {
+          obstacles.splice(i, 1);
+        } else {
+          ctx.fillStyle = "#000";
+          ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+        }
+      }
+
+      // --- HUD: score & speed ---
+      ctx.fillStyle = "#fff";
+      ctx.font = "24px sans-serif";
+      ctx.fillText("Score: " + Math.floor(score), 20, 40);
+      ctx.fillText("Speed: " + gameSpeed.toFixed(2), 20, 70);
+
+      // credit
+      ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+      ctx.font = "16px sans-serif";
+      const credit = "Developed by Toha";
+      const tw = ctx.measureText(credit).width;
+      ctx.fillText(credit, canvas.width - tw - 20, canvas.height - 20);
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    // --- Input handlers ---
+    window.addEventListener("keydown", e => {
+      if (e.code === "Space" && player.grounded) {
+        player.velocityY = -player.jumpForce;
+        player.grounded = false;
+      }
+    });
+
+    window.addEventListener("touchstart", e => {
+      e.preventDefault();
+      if (player.grounded) {
+        player.velocityY = -player.jumpForce;
+        player.grounded = false;
+      }
+    }, { passive: false });
+
+    // --- Game Over & Reset ---
+    function gameOver() {
+      gameRunning = false;
+      ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#fff";
+      ctx.font = "48px sans-serif";
+      ctx.fillText("Game Over", canvas.width / 2 - 100, canvas.height / 2);
+
+      setTimeout(() => {
+        resetGame();
+        gameRunning = true;
+        lastTime = 0;
+        requestAnimationFrame(gameLoop);
+      }, 2000);
+    }
+
+    function resetGame() {
+      player.y        = canvas.height - 150;
+      player.velocityY = 0;
+      obstacles        = [];
+      obstacleTimer    = 0;
+      score            = 0;
+      gameSpeed        = 1;
+    }
+
+    // Start
+    requestAnimationFrame(gameLoop);
+  </script>
 </body>
 </html>
